@@ -1,63 +1,45 @@
 from fastapi.testclient import TestClient
 from app.main import app
 
-client = TestClient(app)
+def test_ml_prediction_endpoint():
+    """Test that the ML endpoint accepts the new feature schema and returns a probability."""
+    # Wrapping in 'with TestClient' forces the startup/lifespan events to run
+    with TestClient(app) as client:
+        payload = {
+            "customer_id": "TEST-ML-001",
+            "tenure": 2,
+            "MonthlyCharges": 85.0,
+            "tickets_7d": 4,
+            "tickets_30d": 12,
+            "tickets_90d": 25,
+            "ticket_sentiment_score": 0.2,
+            "ticket_category_billing": 5,
+            "ticket_category_tech": 8,
+            "time_between_tickets_days": 2.5,
+            "change_in_monthly_charges": 15.0
+        }
+        
+        response = client.post("/predict-risk", json=payload)
+        
+        # Check that the API successfully processed the request
+        assert response.status_code == 200
+        
+        data = response.json()
+        
+        # Verify it's using the ML model and returning the expected data types
+        assert data["customer_id"] == "TEST-ML-001"
+        assert "churn_probability" in data
+        assert type(data["churn_probability"]) == float
+        assert data["system_used"] == "Random Forest ML Model"
 
-def test_rule_1_high_risk():
-    """Test: >5 tickets in last 30 days -> HIGH RISK"""
-    payload = {
-        "customer_id": "TEST-001",
-        "monthly_charges_increased": False,
-        "contract_type": "Two year",
-        "tickets_last_30_days": 6,  # Triggers Rule 1
-        "recent_tickets_raised": 0,
-        "has_complaint_ticket": False
-    }
-    response = client.post("/predict-risk", json=payload)
-    assert response.status_code == 200
-    assert response.json()["risk_category"] == "High"
-    assert "Rule 1" in response.json()["triggered_rule"]
-
-def test_rule_3_high_risk():
-    """Test: Month-to-Month + complaint ticket -> HIGH RISK"""
-    payload = {
-        "customer_id": "TEST-002",
-        "monthly_charges_increased": False,
-        "contract_type": "Month-to-Month", # Triggers Rule 3
-        "tickets_last_30_days": 1,
-        "recent_tickets_raised": 0,
-        "has_complaint_ticket": True       # Triggers Rule 3
-    }
-    response = client.post("/predict-risk", json=payload)
-    assert response.status_code == 200
-    assert response.json()["risk_category"] == "High"
-    assert "Rule 3" in response.json()["triggered_rule"]
-
-def test_rule_2_medium_risk():
-    """Test: monthly charges increased + >=3 tickets raised -> MEDIUM RISK"""
-    payload = {
-        "customer_id": "TEST-003",
-        "monthly_charges_increased": True, # Triggers Rule 2
-        "contract_type": "One year",
-        "tickets_last_30_days": 2,
-        "recent_tickets_raised": 3,        # Triggers Rule 2
-        "has_complaint_ticket": False
-    }
-    response = client.post("/predict-risk", json=payload)
-    assert response.status_code == 200
-    assert response.json()["risk_category"] == "Medium"
-    assert "Rule 2" in response.json()["triggered_rule"]
-
-def test_low_risk():
-    """Test: No rules triggered -> LOW RISK"""
-    payload = {
-        "customer_id": "TEST-004",
-        "monthly_charges_increased": False,
-        "contract_type": "Two year",
-        "tickets_last_30_days": 1,
-        "recent_tickets_raised": 1,
-        "has_complaint_ticket": False
-    }
-    response = client.post("/predict-risk", json=payload)
-    assert response.status_code == 200
-    assert response.json()["risk_category"] == "Low"
+def test_missing_features_returns_422():
+    """Test that missing required ML features throws a validation error."""
+    with TestClient(app) as client:
+        payload = {
+            "customer_id": "TEST-ML-002",
+            "tenure": 5
+            # Missing all other required features
+        }
+        
+        response = client.post("/predict-risk", json=payload)
+        assert response.status_code == 422 # FastAPI standard validation error code
